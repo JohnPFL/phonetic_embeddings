@@ -1,8 +1,11 @@
 from abc import ABC, abstractmethod
-
+import os 
+import pickle
 import numpy as np
-from sklearn.feature_extraction.text import CountVectorizer
-
+from sklearn.feature_extraction.text import CountVectorizer # type: ignore
+import sys
+sys.path.append('/home/sperduti/sound_embeddings/src')
+from sound_embeddings.misspeller import PhoneticMisspeller
 
 class Vocabulary:
     def __init__(self, elements):
@@ -11,12 +14,44 @@ class Vocabulary:
 
     def __len__(self):
         return len(self.id2el)
-
-
+    
 class Encoder(ABC):
     @abstractmethod
     def encode(self, instance):
         ...
+
+class PhoneticVocabulary:
+    def __init__(self, elements, phonetic_dataset, save_folder=None, use_existing=True):
+        self.save_folder = save_folder
+        self.use_existing = use_existing
+
+        if self.use_existing and self.save_folder and self._check_existing_vocabulary():
+            self._load_existing_vocabulary()
+        else:
+            self._train_vocabulary(elements, phonetic_dataset)
+
+    def _train_vocabulary(self, elements, phonetic_dataset):
+        phonetic_misspeller = PhoneticMisspeller(phonetic_dataset)
+        phonetic_elements = phonetic_misspeller.batch_phonemize_parallel(elements, "en-us")
+        self.id2el = sorted(list(set(' '.join(phonetic_elements)))) # type: ignore
+        self.el2id = {el: id for id, el in enumerate(self.id2el)}
+        
+        if self.save_folder:
+            self._save_vocabulary()
+
+    def _save_vocabulary(self):
+        with open(os.path.join(self.save_folder, "vocabulary.pkl"), "wb") as f:  # type: ignore
+            pickle.dump((self.id2el, self.el2id), f)
+
+    def _load_existing_vocabulary(self):
+        with open(os.path.join(self.save_folder, "vocabulary.pkl"), "rb") as f: # type: ignore
+            self.id2el, self.el2id = pickle.load(f)
+    
+    def _check_existing_vocabulary(self):
+        return os.path.exists(os.path.join(self.save_folder, "vocabulary.pkl")) # type: ignore
+    
+    def __len__(self):
+        return len(self.id2el)
 
 
 class CharVocabulary(Vocabulary, Encoder):
@@ -24,6 +59,18 @@ class CharVocabulary(Vocabulary, Encoder):
         super().__init__(' '.join(elements))
 
     def encode(self, instance):
+        unk = len(self)
+        return [self.el2id.get(el, unk) for el in list(instance)]
+
+class PhoneticCharVocabulary(PhoneticVocabulary, Encoder):
+    def __init__(self, elements, phonetic_dataset, save_folder=None, use_existing=True):
+        super().__init__(' '.join(elements), phonetic_dataset, save_folder, use_existing)
+        self.phonetic_dataset = phonetic_dataset
+
+    def encode(self, instance):
+        phonetic_misspeller = PhoneticMisspeller(self.phonetic_dataset)
+        instance = phonetic_misspeller.batch_phonemize_parallel(instance, "en-us", verbose = False)
+        instance = ' '.join(instance) # type: ignore
         unk = len(self)
         return [self.el2id.get(el, unk) for el in list(instance)]
 
@@ -115,16 +162,18 @@ class EarlyStop:
 
 
 if __name__ == '__main__':
-    from data import TextDatasetHate
+    from data.data import TextDatasetHate
+    import time
 
     data = TextDatasetHate()
     X = data.train_X
 
     char_vocab = CharVocabulary(X)
-    word_vocab = WordVocabulary(X)
+    #word_vocab = WordVocabulary(X)
+    start_time = time.time()
+    phonetic_char_vocab = PhoneticCharVocabulary(X, '/home/sperduti/sound_embeddings/sound_embeddings_utils/phonetic_subwords_dataset/hate/phonetic_dict.csv','/home/sperduti/sound_embeddings/Datasets/hate/phonetic_vocab',use_existing=False)
+    end_time = time.time()
+    print("Execution time:", end_time - start_time, "seconds")
 
-    print(f'{len(word_vocab) = }')
-
-    print(char_vocab.encode('Hello, how are you!?'))
-    print(word_vocab.encode('Hello, how are you werwerwer!?'))
+    print(phonetic_char_vocab.encode('Hello, how are you!?'))
 
