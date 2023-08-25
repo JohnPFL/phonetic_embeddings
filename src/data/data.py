@@ -66,37 +66,6 @@ class MultipathDataset(TextDataset):
     def __repr__(self):
         return 'Dataset adversarial\n' + super().__repr__()
 
-class PhoneticNoiseGenerator:
-    def __init__(self, dataset_filename):
-        self.dataset_filename = dataset_filename
-        self.dataset = []
-
-    def read_dataset(self):
-        # Read and preprocess the dataset
-        with open(self.dataset_filename, 'r') as file:
-            for line in file:
-                processed_line = self.preprocess(line)
-                words = processed_line.split()
-                self.dataset.extend(words)
-
-    def preprocess(self, line):
-        # Perform preprocessing on the line
-
-    def build_vocabulary(self):
-        # Build the vocabulary
-
-    def find_zero_edit_distance_pairs(self):
-        # Find pairs of words with zero edit distances
-
-    def generate_noise(self):
-        # Generate noise by replacing words
-
-    def run(self):
-        self.read_dataset()
-        self.build_vocabulary()
-        candidate_pairs = self.find_zero_edit_distance_pairs()
-        self.generate_noise()
-
 class NeuralDataset(Dataset):
 
     # It takes in input a training column and a label column
@@ -106,10 +75,7 @@ class NeuralDataset(Dataset):
         self.post_pone_encoding = lazy_encoding
         self.embedder_for_repr = embedder_for_repr
         self.kernel_size = kernel_size
-        if embedder_for_repr:
-            self.instances = X if lazy_encoding else [encoder.encode_for_repr(sentence[:MAX_LENGTH]) for sentence in X]
-        else:
-            self.instances = X if lazy_encoding else [encoder.encode(sentence[:MAX_LENGTH]) for sentence in X]
+        self.instances = X if lazy_encoding else [encoder.encode(sentence[:MAX_LENGTH]) for sentence in X]
         self.labels = y
 
     def __len__(self):
@@ -118,10 +84,7 @@ class NeuralDataset(Dataset):
     def __getitem__(self, idx):
         instance = self.instances[idx]
         if self.post_pone_encoding:
-            if self.embedder_for_repr:
-                instance = self.encoder.encode_for_repr(instance[:self.max_length])
-            else: 
-                instance = self.encoder.encode(instance[:self.max_length])
+            instance = self.encoder.encode(instance[:self.max_length])
 
         if self.labels is None:
             return instance
@@ -130,12 +93,8 @@ class NeuralDataset(Dataset):
             return instance, label
 
     def asDataLoader(self, batch_size, shuffle=False):
-        unk = len(self.encoder)
+        unk = len(self.encoder) # type: ignore
         # this case is useful when using the cnn representation layer before the classifier
-        if self.embedder_for_repr:
-            unk_rep = self.encoder.encode_for_repr(' ')
-        else: 
-            unk_rep = 0
 
         def pad(X, repr_cnn= self.embedder_for_repr, kernel_size = self.kernel_size):
             longest_sentence = max(map(len, X))
@@ -145,8 +104,6 @@ class NeuralDataset(Dataset):
             if isinstance(X[0], list) and self.embedder_for_repr is False:
                 Xpadded = [instance + [unk] * (longest_sentence - len(instance)) for instance in X]
                 Xpadded = torch.tensor(Xpadded)
-            elif repr_cnn:
-                Xpadded = [instance + unk_rep * (longest_sentence - len(instance)) for instance in X]
             else:
                 Xpadded = np.zeros(shape=(len(X), longest_sentence, len(X[0][0])))
                 for i, xi in enumerate(X):
@@ -181,6 +138,5 @@ if __name__ == '__main__':
     data = TextDatasetHate()
     print(data)
 
-    data = TextDatasetHS()
     print(data)
 
