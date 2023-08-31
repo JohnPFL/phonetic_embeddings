@@ -1,28 +1,29 @@
-from abc import ABC, abstractmethod
-import numpy as np
-import pandas as pd
+import sys
+sys.path.append('/home/sperduti/sound_embeddings/src')
+sys.path.append('/home/sperduti/sound_embeddings/src/models')
+sys.path.append('/home/sperduti/sound_embeddings/src/module')
+sys.path.append('/home/sperduti/sound_embeddings/src/utils')
+sys.path.append('/home/sperduti/sound_embeddings/src/sound_embeddings')
+
 import os
+from os.path import join
 import sys
 import shutil
 import time
-from os.path import join
-import io
+
+import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import torch.nn.utils as utils
 import torch.nn.init as init
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 from sklearn.metrics import f1_score, recall_score, precision_score # type: ignore
 from sklearn.model_selection import train_test_split # type: ignore
-from sklearn.svm import LinearSVC # type: ignore
-from sklearn.feature_extraction.text import TfidfVectorizer # type: ignore
-from models_ import SVMclassifier, CNNbaseClassifier
-from utils.util import CharVocabulary, VisuallyGroundedVocabulary, EarlyStop
-from data.data import TextDataset, NeuralDataset
+
+from utils.util import EarlyStop
+from data.data import  NeuralDataset
 from data import data
-from sklearn.metrics import f1_score, recall_score, precision_score # type: ignore
+
 
 
 def evaluate_metrics(predictions, true_labels, dataset=None):
@@ -222,8 +223,16 @@ def initialize_early_stop(patience):
         return EarlyStop(patience)
     return None
 
-def training_loop(model, train_X, train_y, valid_y, valid_loader, optimizer, 
-                  criterion, early_stop, nepochs, max_instances,
+def definig_latest_model(dataset_name, model_name, epoch):
+    timestamp = time.time()
+    formatted_time = time.strftime('%Y-%m-%d%H:%M:%S', time.localtime(timestamp))
+    latest_model = f"{dataset_name}{model_name.split('/')[-1]}_epoch_{epoch}_time_{formatted_time}.pt"
+    return latest_model
+
+def training_loop(model, train_X, train_y, valid_y, 
+                  valid_loader, optimizer, 
+                  criterion, early_stop, 
+                  nepochs, max_instances,
                   tmp_path, def_path, dataset_name, 
                   model_name, device, batch_size, char_encoder,
                   max_length, lazy_loader):
@@ -251,25 +260,47 @@ def training_loop(model, train_X, train_y, valid_y, valid_loader, optimizer,
         max_length (int): Maximum sequence length.
         lazy_loader (bool): Lazy encoding flag.
     """
+    latest_model = None
     for epoch in range(nepochs):
         start_index = (epoch % (len(train_X) // max_instances)) * max_instances
         end_index = start_index + max_instances
         subset_X, subset_y = train_X[start_index:end_index], train_y[start_index:end_index]
 
-        train_loader = NeuralDataset(subset_X, subset_y, char_encoder, MAX_LENGTH=max_length, lazy_encoding=lazy_loader).asDataLoader(batch_size, shuffle=True)
+        train_loader = NeuralDataset(subset_X, subset_y, char_encoder, 
+                                     MAX_LENGTH=max_length, 
+                                     lazy_encoding=lazy_loader).asDataLoader(batch_size, shuffle=True)
 
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, epoch, device=device, batch_size=batch_size)
-        val_loss = val_epoch(model, valid_loader, criterion, valid_y, device=device, batch_size=batch_size)
+        train_loss = train_epoch(model, train_loader, optimizer, 
+                                 criterion, epoch, device=device, batch_size=batch_size)
+        val_loss = val_epoch(model, valid_loader, criterion, 
+                             valid_y, device=device, batch_size=batch_size)
 
         if early_stop:
-            latest_model = process_early_stop(model, val_loss, epoch, early_stop, 
-                                              tmp_path, def_path, dataset_name, 
-                                              model_name,  valid_loader, optimizer, criterion, device)
+            if latest_model is None:
+                latest_model = definig_latest_model(dataset_name, 
+                                                model_name,
+                                                epoch)
+            latest_model = process_early_stop(model, val_loss, 
+                                                    epoch, early_stop, 
+                                                    tmp_path, def_path,   
+                                                    dataset_name, 
+                                                    model_name,
+                                                    latest_model, valid_loader, 
+                                                    optimizer, criterion, device)
         else:
             break
+        
+        if early_stop.STOP is True:
+            return def_path, latest_model
+
+    return def_path, latest_model
+
+
 
 def process_early_stop(model, val_loss, epoch, early_stop, tmp_path, 
-                       def_path,  dataset_name, model_name, 
+                       def_path, 
+                        dataset_name, 
+                                                model_name, latest_model, 
                        valid_loader, optimizer, criterion, device):
     """
     Process early stopping and save the best model.
@@ -291,12 +322,11 @@ def process_early_stop(model, val_loss, epoch, early_stop, tmp_path,
     Returns:
         str: Path to the latest saved model.
     """
-    latest_model = 'ok'
     early_stop(val_loss, epoch)
+    print(f'improved: {early_stop.IMPROVED}')
+    print(tmp_path)
     if early_stop.IMPROVED:
-        timestamp = time.time()
-        formatted_time = time.strftime('%Y-%m-%d%H:%M:%S', time.localtime(timestamp))
-        latest_model = f"{dataset_name}{model_name.split('/')[-1]}_epoch_{epoch}_time_{formatted_time}.pt"
+        latest_model = definig_latest_model(dataset_name, model_name, epoch)
         torch.save(model, join(tmp_path, latest_model))
     elif early_stop.STOP:
         shutil.move(join(tmp_path, latest_model), join(def_path, latest_model))
@@ -307,11 +337,14 @@ def process_early_stop(model, val_loss, epoch, early_stop, tmp_path,
         model = torch.load(join(def_path, latest_model))
         train_epoch(model, valid_loader, optimizer, criterion, epoch + 1, device=device)
         torch.save(model, join(def_path, latest_model))
+        latest_model = join(def_path, latest_model)
+        return latest_model
+
     return latest_model
 
 def train_model(model, X, y, char_encoder, dataset_name, batch_size, seed,
-                max_length=500, tmp_path='/home/sperduti/vgm/Model/tmp',
-                def_path='/home/sperduti/vgm/Model/definitive', nepochs=500,
+                max_length=100, tmp_path='',
+                def_path='', nepochs=500,
                 lazy_loader=False, device='cuda', model_name='model',
                 patience=10, lr=0.0001):
     """
@@ -338,30 +371,42 @@ def train_model(model, X, y, char_encoder, dataset_name, batch_size, seed,
     Returns:
         str: Path to the final saved model.
     """
-    latest_model = 'ok'
+
     max_instances = 1819
 
     val_size = int(len(X) * 0.25)
     if val_size > 2000:
         val_size = 2000
 
-    train_X, valid_X, train_y, valid_y = train_test_split(X, y, stratify=y, test_size=val_size, random_state=seed)
-    valid_loader = NeuralDataset(valid_X, valid_y, char_encoder, MAX_LENGTH=max_length, lazy_encoding=lazy_loader).asDataLoader(batch_size)
+    train_X, valid_X, train_y, valid_y = train_test_split(X, y, stratify=y, 
+                                                          test_size=val_size, random_state=seed)
+    
+    valid_loader = NeuralDataset(valid_X, valid_y, char_encoder, 
+                                 MAX_LENGTH=max_length, lazy_encoding=lazy_loader).asDataLoader(batch_size)
 
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
     criterion = nn.BCEWithLogitsLoss()
 
     early_stop = initialize_early_stop(patience)
 
-    training_loop(model, train_X, train_y, valid_y, valid_loader, optimizer, 
-                  criterion, early_stop, nepochs, max_instances,
-                  tmp_path, def_path, dataset_name, 
-                  model_name, device, batch_size, char_encoder,
-                  max_length, lazy_loader)
+
+    def_path, latest_model = training_loop(model, train_X, train_y, valid_y, 
+                                           valid_loader, optimizer, 
+                                            criterion, early_stop, 
+                                            nepochs, max_instances,
+                                            tmp_path, def_path, 
+                                            dataset_name, model_name, 
+                                            device, batch_size, 
+                                            char_encoder, max_length, lazy_loader)
+
+    if not latest_model:
+        latest_model = 'BUG'
 
     return join(def_path, latest_model)
 
-def prepare_dataframe(dataframe_path, dataset_name, hardness, condition, implied_models, implied_metrics, rerun_check):
+def prepare_dataframe(dataframe_path, dataset_name, 
+                      condition, implied_models, 
+                      implied_metrics, rerun_check):
     """
     Prepare an empty or loaded DataFrame for storing experiment results.
 
@@ -381,9 +426,9 @@ def prepare_dataframe(dataframe_path, dataset_name, hardness, condition, implied
     if not os.path.exists(dataframe_path):
         # Create column index for MultiIndex DataFrame
         if isinstance(implied_models, list):
-            a_columns = pd.MultiIndex.from_product([[f"{dataset_name}{hardness}"], [condition], implied_models])
+            a_columns = pd.MultiIndex.from_product([[f"{dataset_name}"], [condition], implied_models])
         else: 
-            a_columns = pd.MultiIndex.from_product([[f"{dataset_name}{hardness}"], [condition], [implied_models.name]])
+            a_columns = pd.MultiIndex.from_product([[f"{dataset_name}"], [condition], [implied_models.name]])
         df = pd.DataFrame(index=implied_metrics, columns=a_columns)
     else:
         # Load the existing DataFrame
@@ -397,7 +442,7 @@ def prepare_dataframe(dataframe_path, dataset_name, hardness, condition, implied
     return df
 
 
-def add_results_to_dataframe(df, dataset_name, hardness, condition, model_name, implied_metrics, results):
+def add_results_to_dataframe(df, dataset_name, condition, model_name, implied_metrics, results):
     """
     Add experiment results to the DataFrame.
 
@@ -413,35 +458,35 @@ def add_results_to_dataframe(df, dataset_name, hardness, condition, model_name, 
     Returns:
         pd.DataFrame: DataFrame with added experiment results.
     """
-    # If the condition is 'adversarial', update the DataFrame for each metric
-    if condition == 'adversarial':
-        for metric in implied_metrics:
-            try:
-                # Try to add the metric result to the DataFrame cell
-                df.loc[metric, (f"{dataset_name}{hardness}", condition, model_name)] = results[metric]
-            except KeyError:
-                # If the metric is missing in the results, fill the cell with 0
-                df.loc[metric, (f"{dataset_name}{hardness}", condition, model_name)] = 0
+    for metric in implied_metrics:
+        try:
+            # Try to add the metric result to the DataFrame cell
+            df.loc[metric, (f"{dataset_name}", condition, model_name)] = results[metric]
+        except KeyError:
+            # If the metric is missing in the results, fill the cell with 0
+            df.loc[metric, (f"{dataset_name}", condition, model_name)] = 0
     
     return df
 
 
-def prepare_and_update_dataframe(dataframe_path_a, dataframe_path_c, dataset_name, hardness,
+def prepare_and_update_dataframe(dataframe_path_a, dataframe_path_c, type_of_adv, dataset_name,
                                  implied_models, implied_metrics, rerun_check, model_name, 
                                  results_clean, results_adversarial):
     # Prepare or load DataFrames for adversarial and clean conditions
-    df_adv = prepare_dataframe(dataframe_path_a, dataset_name, hardness, 'adversarial', implied_models, implied_metrics, rerun_check)
-    df_c = prepare_dataframe(dataframe_path_c, dataset_name, hardness, 'clean', implied_models, implied_metrics, rerun_check)
+    df_adv = prepare_dataframe(dataframe_path_a, dataset_name, type_of_adv, implied_models, implied_metrics, rerun_check)
+    df_c = prepare_dataframe(dataframe_path_c, dataset_name, 'clean', implied_models, implied_metrics, rerun_check)
     
     # Add results to the clean DataFrame
-    df_c = add_results_to_dataframe(df_c, dataset_name, hardness, 'clean', model_name, implied_metrics, results_clean)
+    df_c = add_results_to_dataframe(df_c, dataset_name,'clean', model_name, implied_metrics, results_clean)
     
     # Add results to the adversarial DataFrame
-    df_adv = add_results_to_dataframe(df_adv, dataset_name, hardness, 'adversarial', model_name, implied_metrics, results_adversarial)
+    df_adv = add_results_to_dataframe(df_adv, dataset_name,  type_of_adv, model_name, implied_metrics, results_adversarial)
     
     return df_c, df_adv
 
-def pipeline_adversarial(cln_path, adv_path, model, dataframe_path, hardness, kernel_heights, visual_kernel_heights, seed, verbose, rerun_check, implied_models):
+def pipeline_adversarial(cln_path, adv_path, 
+                         model, dataframe_path, 
+                         verbose, rerun_check, implied_models, pht_path = 'False'):
     """
     Execute the pipeline for adversarial experiments.
 
@@ -461,32 +506,66 @@ def pipeline_adversarial(cln_path, adv_path, model, dataframe_path, hardness, ke
     Returns:
         None
     """
-    dataset_clean = data.MultipathDataset(cln_path, cln_path)
-    dataset_adv = data.MultipathDataset(cln_path, adv_path, hard = True)
+    
+    if pht_path == 'False':
+        pht_path = False
+
+    dataset_clean = data.MultipathDataset(cln_path, cln_path, phonetic = True)
+    dataset_adv = data.MultipathDataset(cln_path, adv_path, phonetic = True)
+
+    if pht_path:
+        dataset_pht = data.MultipathDataset(cln_path, pht_path)
+
     # Datasetname is extrapolated from the given clean path
     dataset_name = cln_path.split('/')[-1]
     dataframe_path_c = dataframe_path + '_cl.pkl'
     dataframe_path_a = dataframe_path + '_adv.pkl'
 
+    if pht_path:
+        dataframe_path_pht = dataframe_path + 'pht.pkl'
+
     if model.name != 'svm':
-        model.fit(dataset_clean.train_X, dataset_clean.train_y, dataset_name + str(hardness))
+        model.fit(dataset_clean.train_X, dataset_clean.train_y, dataset_name)
     else:
         model.fit(dataset_clean.train_X, dataset_clean.train_y)
 
     predictions_adv, predictions_clean = predict_datasets(model, dataset_adv, dataset_clean)
 
-    # _c == metrics for the clean test dataset
-    results_c = evaluate_metrics(dataset_clean, predictions_clean)
-    # _a == metrics for the adversarial test dataset
-    results_a = evaluate_metrics(dataset_adv, predictions_adv)
+    if pht_path:
+        predictions_pht = model.predict(dataset_pht.test_X) # type: ignore
 
-    implied_metrics = ['prec',  'macrof1',  'f1', 'f1neg', 'recall',  'acc']
+    # _c == metrics for the clean test dataset
+    results_c = evaluate_metrics(dataset_clean.test_y, predictions_clean)
+    # _a == metrics for the adversarial test dataset
+    results_a = evaluate_metrics(dataset_adv.test_y, predictions_adv)
+
+    if pht_path:
+        results_pht = evaluate_metrics(predictions_pht, dataset_pht.test_y) # type: ignore
+        print('these are the results with phonemic dataset:', results_pht)
     
-    df_c, df_adv = prepare_and_update_dataframe(dataframe_path_a, dataframe_path_c, dataset_name, hardness, 
-                                                implied_models, implied_metrics, rerun_check, model.name, results_c, results_a)
+    print('these are the results for clean:', results_c)
+    print('these are the results for adversarial:', results_a)
+    
+
+    implied_metrics = ['precision',  'macrof1',  'f1', 'f1neg', 'recall',  'accuracy']
+
+    type_of_adv = 'adversarial'
+
+    df_c, df_adv = prepare_and_update_dataframe(dataframe_path_a, dataframe_path_c, type_of_adv,
+                                                dataset_name,  
+                                                implied_models, implied_metrics, 
+                                                rerun_check, model.name, results_c, results_a)
+    if pht_path: 
+        type_of_adv = 'phonetized_adversarial'
+        df_c, df_pht= prepare_and_update_dataframe(dataframe_path_a, dataframe_path_c, type_of_adv,
+                                                dataset_name,  
+                                                implied_models, implied_metrics, 
+                                                rerun_check, model.name, results_c, results_a)
 
     df_c.to_pickle(dataframe_path_c)
     df_adv.to_pickle(dataframe_path_a)
+    if pht_path: #type: ignore
+        df_pht.to_pickle(dataframe_path_pht) #type: ignore
     
     # Print dataframes if verbose
     if verbose:
@@ -494,3 +573,6 @@ def pipeline_adversarial(cln_path, adv_path, model, dataframe_path, hardness, ke
         print(df_c)
         print("Adversarial DataFrame:")
         print(df_adv)
+        if df_pht is not None: #type: ignore
+            print("Phonetized adversarial")
+            print(df_pht) #type: ignore
