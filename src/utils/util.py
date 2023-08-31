@@ -6,6 +6,12 @@ from sklearn.feature_extraction.text import CountVectorizer # type: ignore
 import sys
 sys.path.append('/home/sperduti/sound_embeddings/src')
 from sound_embeddings.misspeller import PhoneticMisspeller
+from phonemizer import phonemize
+from functools import partial
+from multiprocessing import Pool, cpu_count
+from tqdm import tqdm
+import resource
+
 
 class Vocabulary:
     def __init__(self, elements):
@@ -32,7 +38,7 @@ class PhoneticVocabulary:
 
     def _train_vocabulary(self, elements, phonetic_dataset):
         phonetic_misspeller = PhoneticMisspeller(phonetic_dataset)
-        phonetic_elements = phonetic_misspeller.batch_phonemize_parallel(elements, "en-us")
+        phonetic_elements = phonetic_misspeller.batch_phonemize_parallel(elements[:10], "en-us")
         self.id2el = sorted(list(set(' '.join(phonetic_elements)))) # type: ignore
         self.el2id = {el: id for id, el in enumerate(self.id2el)}
         
@@ -160,20 +166,91 @@ class EarlyStop:
             if self.patience <= 0:
                 self.STOP = True
 
+def set_memory_limit(limit_mb):
+    resource.setrlimit(resource.RLIMIT_AS, (limit_mb * 1024 * 1024, resource.RLIM_INFINITY))
+
+# Set the memory limit to 2 GB (2000 MB)
+#set_memory_limit(5000)
+
+
+def phonemize_sentence(sentence, language):
+    return phonemize(sentence, language=language)
+
+def process_and_phonemize_batch(dataset_filename, new_dataset, language, batch_size=1000):
+    with open(dataset_filename, 'r', encoding='utf-8') as file:
+        lines = file.readlines()
+
+    sentences = []
+    labels = []
+    for line in lines:
+        parts = line.strip().split('\t')
+        if len(parts) == 2:
+            label, sentence = parts
+            sentences.append(sentence)
+            labels.append(label)
+
+    total_sentences = len(sentences)
+    batches = (total_sentences + batch_size - 1) // batch_size
+
+    for batch_num in range(batches):
+        start_idx = batch_num * batch_size
+        end_idx = min((batch_num + 1) * batch_size, total_sentences)
+        batch_sentences = sentences[start_idx:end_idx]
+
+        num_processes = cpu_count()
+        pool = Pool(processes=num_processes)
+        phonemization_function = partial(phonemize_sentence, language=language)
+
+        phonemized_results = []
+        with tqdm(total=len(batch_sentences), desc=f"Phonemizing Batch {batch_num+1}/{batches}", unit="sentence") as pbar:
+            for result in pool.imap_unordered(phonemization_function, batch_sentences):
+                phonemized_results.append(result)
+                pbar.update(1)
+
+        with open(new_dataset, 'a', encoding='utf-8') as file:
+            for label, result in zip(labels[start_idx:end_idx], phonemized_results):
+                file.write(f'{label}\t{result}\n')
+
+        pool.close()
+        pool.join()
+    
+def save_phonemized_dataset(dataset_filename, phonemized_sentences, phonemized_path):
+    with open(phonemized_path, 'w', encoding='utf-8') as file:
+        with open(dataset_filename, 'r', encoding='utf-8') as original_file:
+            original_lines = original_file.readlines()
+
+            for i, line in enumerate(original_lines):
+                parts = line.strip().split('\t')
+                if len(parts) == 2:
+                    label = parts[0]
+                    phonemized_sentence = phonemized_sentences[i]
+                    new_line = f"{label}\t{phonemized_sentence}\n"
+                    file.write(new_line)
+
 
 if __name__ == '__main__':
     from data.data import TextDatasetHate
     import time
 
-    data = TextDatasetHate()
-    X = data.train_X
+    #data = TextDatasetHate()
+    #X = data.train_X
 
-    char_vocab = CharVocabulary(X)
+    #char_vocab = CharVocabulary(X)
     #word_vocab = WordVocabulary(X)
-    start_time = time.time()
-    phonetic_char_vocab = PhoneticCharVocabulary(X, '/home/sperduti/sound_embeddings/sound_embeddings_utils/phonetic_subwords_dataset/hate/phonetic_dict.csv','/home/sperduti/sound_embeddings/Datasets/hate/phonetic_vocab',use_existing=False)
-    end_time = time.time()
-    print("Execution time:", end_time - start_time, "seconds")
+    #start_time = time.time()
+    #phonetic_char_vocab = PhoneticCharVocabulary(X,
+    #                                              '/home/sperduti/sound_embeddings/sound_embeddings_utils/phonetic_subwords_dataset/hate/phonetic_dict.csv',
+    #                                              '/home/sperduti/sound_embeddings/Datasets/hate/phonetic_vocab',
+    #                                              use_existing=False)
+    #end_time = time.time()
+    #print("Execution time:", end_time - start_time, "seconds")
 
-    print(phonetic_char_vocab.encode('Hello, how are you!?'))
+    #print(phonetic_char_vocab.encode('Hello, how are you!?'))
+
+    dataset_filename = 'sound_embeddings/Datasets/hate/misspelled_datasets/test.txt'  # Replace with your dataset filename
+    language = 'en-us'  # Replace with the desired language code
+    phonemized_path = 'sound_embeddings/Datasets/hate/phonemized_dataset/test_misspelled.txt'
+
+    process_and_phonemize_batch(dataset_filename, phonemized_path, language, 100)
+
 
