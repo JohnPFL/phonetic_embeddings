@@ -2,6 +2,7 @@ from phonemizer import phonemize
 import string
 from collections import Counter
 import pickle
+from typing import List, Dict
 
 class PhoneticDictionaryBuilder:
     """
@@ -22,7 +23,7 @@ class PhoneticDictionaryBuilder:
         phonemize(): Tokenize and convert dataset words to phonetic representations.
         build_phonetic_dictionary(dict_path: str = None) -> dict: Build and optionally save the phonetic dictionary.
     """
-    def __init__(self, dataset_path, max_words:int):
+    def __init__(self,  dataset_path: str, max_words: int):
         """
         Initialize the PhoneticDictionaryBuilder.
 
@@ -32,9 +33,9 @@ class PhoneticDictionaryBuilder:
         """
         self.dataset_path = dataset_path
         self.max_words = max_words
-        self.phonetic_dict = {}
+        self.phonetic_dict: Dict[str, str] = {}
 
-    def read_dataset(self):
+    def read_dataset(self) -> List[str]:
         with open(self.dataset_path, 'r') as file:
             lines = file.readlines()
         texts = []
@@ -43,13 +44,13 @@ class PhoneticDictionaryBuilder:
             texts.append(text)
         return texts
 
-    def remove_non_alphanumeric(self, text):
+    def remove_non_alphanumeric(self, text: str) -> str:
         translator = str.maketrans('', '', string.punctuation.replace(' ', ''))
         return text.translate(translator)
     
     def phonemize(self):
         texts = self.read_dataset()
-        tokenized_texts  = [self.remove_non_alphanumeric(text).lower().split() for text in texts]
+        tokenized_texts = [self.remove_non_alphanumeric(text).lower().split() for text in texts]
         # Collect unique words
         word_counts = Counter([word for text in tokenized_texts for word in text])
         vocabulary = list(word_counts.keys())
@@ -57,7 +58,7 @@ class PhoneticDictionaryBuilder:
         phonetic_texts = [phonemize(v, backend="espeak", language="en-us", strip=True) for v in vocabulary[:self.max_words]]
         return vocabulary, phonetic_texts
 
-    def build_phonetic_dictionary(self, dict_path=None, csv_check=None):
+    def build_phonetic_dictionary(self, dict_path) -> Dict[str, str]:
         """
         Build the phonetic dictionary and optionally save it to a file using pickle.
 
@@ -80,7 +81,7 @@ class PhoneticDictionaryBuilder:
         return v_to_p
     
     @staticmethod
-    def load_dictionary_from_pickle(dict_path):
+    def load_dictionary_from_pickle(dict_path: str) -> Dict[str, str]:
         """
         Load a dictionary from a pickle file.
 

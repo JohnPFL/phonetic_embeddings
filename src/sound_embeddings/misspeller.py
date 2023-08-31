@@ -3,7 +3,6 @@ import pandas as pd
 from phonemizer import phonemize
 import multiprocessing
 from functools import partial
-from phonemizer import phonemize
 from tqdm import tqdm  # Import the tqdm library
 import string
 import os
@@ -12,6 +11,9 @@ class PhoneticMisspeller:
     def __init__(self, dataframe):
         self.dataframe = pd.read_csv(dataframe, delimiter=';')
         self.misspellings_dict = {}
+
+    def remove_numbers(self, input_string):
+        return ''.join(char for char in input_string if not char.isdigit())
 
     def exclude_and_get_random(self, L, x):
         if x in L:
@@ -76,9 +78,11 @@ class PhoneticMisspeller:
         return misspelled_sentence
 
     def process_sentence(self, sentence):
-        phonetic_transcriptions = self.transcribe_sentence(sentence).replace('ː', '') # type: ignore
+        sentence = self.remove_numbers(sentence)
+        sentence = sentence.replace(':','').replace('-','')
+        phonetic_transcriptions = self.transcribe_sentence(sentence) # type: ignore
         word_list = sentence.split()
-        phonetic_transcriptions = phonetic_transcriptions.split()
+        phonetic_transcriptions = phonetic_transcriptions.split() # type: ignore
 
         mapping_phoneme_to_word = self.create_mapping_phoneme_to_word(phonetic_transcriptions, word_list)
 
@@ -99,10 +103,11 @@ class PhoneticMisspeller:
         return [self.misspell_sentence(sentence) for sentence in batch]
     
     def _load_existing_dataset(self, save_folder):
-        existing_dataset_path = os.path.join(save_folder, "test.txt")
+        existing_dataset_path = os.path.join(save_folder)
         if os.path.exists(existing_dataset_path):
             with open(existing_dataset_path, "r") as f:
                 batched_results = f.read().splitlines()
+                batched_results = [result.split('\t')[1] for result in batched_results]
             return batched_results
         return None
 
@@ -111,40 +116,47 @@ class PhoneticMisspeller:
             os.makedirs(save_folder)
         dataset_path = os.path.join(save_folder, "test.txt")
         with open(dataset_path, "w") as f:
-            for result in batched_results:
-                f.write(result + "\n")
+            for label, text in batched_results:
+                entry = f"{label} \t {text}"
+                f.write(entry + "\n")
 
     
-    def batch_misspell_dataset_parallel(self, X, y, save_folder, batch_size=10):
-        num_processes = multiprocessing.cpu_count()  # Get the number of available CPU cores
-        total_batches = len(X) // batch_size + (1 if len(X) % batch_size != 0 else 0)
+    
+    def batch_misspell_dataset_parallel(self, X, y, save_folder):
         
         batched_results = self._load_existing_dataset(save_folder)
         if batched_results is not None:
             return batched_results
-        
-        with multiprocessing.Pool(processes=num_processes) as pool:
-            batched_results = []
-            for batch_num, i in enumerate(range(0, len(X), batch_size), start=1):
-                batch_X = X[i:i+batch_size]
-                batch_y = y[i:i+batch_size]
-                
-                # Apply misspelling only to the sentences with positive labels (1)
-                batch_results = []
-                for sentence, label in zip(batch_X, batch_y):
-                    if label == '1':
-                        batch_results.append(self.misspell_sentence(sentence))
-                    else:
-                        batch_results.append(sentence)
-                batched_results.extend(batch_results)
 
-                print(f"Processed batch {batch_num}/{total_batches}")
+        batch_results = self.process_batch_parallel(X, y)
         
         if save_folder:
-            self._save_dataset(save_folder, batched_results)
-        
+            self._save_batch_to_dataset(save_folder, batch_results)
+
+            # Clear memory
+        batch_results = None
+        del batch_results
+    
         return batched_results
 
+    def process_batch_parallel(self, batch_X, batch_y):
+        with multiprocessing.Pool(processes=4) as pool:
+            batch_results = []
+            for sentence, label in zip(batch_X, batch_y):
+                if label == 1:
+                    batch_results.append((label, self.misspell_sentence(sentence)))
+                else:
+                    batch_results.append((label, sentence))
+        pool.close()
+        pool.join()
+        return batch_results
+    
+    def _save_batch_to_dataset(self, save_folder, batch_results):
+        # Assume batch_results is a list of (label, sentence) tuples
+        with open(save_folder, 'a', encoding='utf-8') as file:
+            for label, sentence in batch_results:
+                file.write(f'{label}\t{sentence}\n')
+    
     def misspell_entire_dataset(self, X, y, batch_size=10):
         batched_dataset = self.batch_misspell_dataset_parallel(X, y, batch_size)
         return batched_dataset
