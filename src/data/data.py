@@ -1,10 +1,14 @@
-from functools import cached_property
-import torch
-import numpy as np
 from os.path import join
+from functools import cached_property
+
+import numpy as np
+import torch
 from torch.utils.data import Dataset, DataLoader
 
-from utils.util import Vocabulary, Encoder
+from utils.util import Encoder
+
+import string
+
 
 DATASETS = ['hate']
 
@@ -12,7 +16,7 @@ DATASETS = ['hate']
 class TextDataset:
     def __init__(self, path):
         self.train_X, self.train_y = TextDataset._read(join(path, 'train.txt'))
-        self.test_X, self.test_y = TextDataset._read(join(path, 'test.txt'))
+        self.test_X, self.test_y = TextDataset._read(path)
         self.classes = np.unique(self.train_y).sort()
 
     def __repr__(self):
@@ -46,22 +50,43 @@ class TextDataset:
             return X, y
 
 class TextDatasetHate(TextDataset):
-    def __init__(self):
-        super().__init__(f'Datasets/hate')
+    def __init__(self, phonemized_path):
+        super().__init__(f'/sound_embeddings/Datasets/hate')
         self.name = 'hate'
+        self.train_X_phonetics, self.train_y = TextDataset._read(join(phonemized_path, 'train.txt'))
+        self.test_x_phonetics, self.test_y = TextDataset._read(join(phonemized_path, 'test.txt'))
+        self.test_x_misspelled_phonetics, self.test_y = TextDataset._read(join(phonemized_path, 'test_misspelled.txt'))
+
 
     def __repr__(self):
         return 'Dataset Hate\n' + super().__repr__()
 
 class MultipathDataset(TextDataset):
-    def __init__(self, clean_path, adv_path, hard=False):
+    def __init__(self, clean_path, adv_path, phonetic = True, hard=False):
         self.train_X, self.train_y = TextDataset._read(join(clean_path, 'train.txt'))
-        self.test_X, self.test_y = TextDataset._read(join(adv_path, 'test.txt'))
-        if hard:
-            self.hard_train_X, self.hard_train_y = TextDataset._read(join(adv_path, 'hard_train.txt'))
-            self.hard_test_X, self.hard_test_y = TextDataset._read(join(adv_path, 'hard_test.txt'))
-        self.classes = np.unique(self.train_y).sort()
+        self.test_X, self.test_y = TextDataset._read(adv_path)
+        # Get unique classes and sort them
+        self.classes = np.unique(self.train_y)
+        self.classes.sort()
+        
         self.name = 'adv'
+
+        # Remove punctuations and special characters from train_X and test_X
+        if phonetic:
+            self.train_X = [self._remove_special_characters(text) for text in self.train_X]
+            self.test_X = [self._remove_special_characters(text) for text in self.test_X]
+
+
+
+    def _remove_special_characters(self, text):
+        # Remove punctuations using string.punctuation
+        translator = str.maketrans('', '', string.punctuation)
+        text_without_punctuations = text.translate(translator)
+        
+        # Remove specific character 'ː'
+        text_without_special_char = text_without_punctuations.replace('ː', '')
+        
+        return text_without_special_char
 
     def __repr__(self):
         return 'Dataset adversarial\n' + super().__repr__()
@@ -135,7 +160,7 @@ if __name__ == '__main__':
     data = TextDataset(inpath)
     print(data)
 
-    data = TextDatasetHate()
+    data = TextDatasetHate('/sound_embeddings/Datasets/hate/phonemized_dataset')
     print(data)
 
     print(data)
