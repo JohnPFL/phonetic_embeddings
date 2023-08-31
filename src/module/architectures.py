@@ -1,11 +1,9 @@
+
+
 import torch
-from torch import nn, Tensor
+from torch import nn
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-import math
-from torch.nn import TransformerEncoder, TransformerEncoderLayer
-from torch.utils.data import dataset
 
 class CNNlayer(nn.Module):
 
@@ -55,10 +53,41 @@ class CNNlayer(nn.Module):
 
 class CNNbase(nn.Module):
 
-    def __init__(self, vocab_size, embedding_dim=32, out_channels=128, n_class=1, kernel_heights=[3, 5, 6], stride=1,
-                 padding=0, drop_prob=0.5):
+    def __init__(self, vocab_size, embedding_dim=32, out_channels=128, 
+                 n_class=1, kernel_heights=[3, 6, 12], stride=1,
+                 padding=0, drop_prob=0.7, tmp_path = '', def_path = ''):
 
         super(CNNbase, self).__init__()
+        self.embedding = nn.Embedding(vocab_size, embedding_dim)
+        self.cnn_layer = CNNlayer(
+            out_channels=out_channels,
+            n_class=n_class,
+            embedding_dim=embedding_dim,
+            kernel_heights=kernel_heights,
+            stride=stride,
+            padding=padding,
+            drop_prob=drop_prob)
+        
+        self.xavier_uniform()
+        
+    def forward(self, input):   # input.size() = (batch_size, num_seq)
+        input = self.embedding(input)  # input.size() = (batch_size, num_seq, embedding_dim)
+        out = self.cnn_layer(input)
+        return out
+
+    def xavier_uniform(self):
+        for p in self.parameters():
+            if p.dim() > 1 and p.requires_grad:
+                nn.init.xavier_uniform_(p)
+        return self
+
+class PhoneticCNN(nn.Module):
+
+    def __init__(self, vocab_size, embedding_dim=32, 
+                 out_channels=128, n_class=1, kernel_heights=[3, 5, 6], stride=1,
+                 padding=0, drop_prob=0.5, tmp_path = '', def_path = ''):
+
+        super(PhoneticCNN, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_dim)
         self.cnn_layer = CNNlayer(
             out_channels=out_channels,
@@ -79,3 +108,5 @@ class CNNbase(nn.Module):
             if p.dim() > 1 and p.requires_grad:
                 nn.init.xavier_uniform_(p)
         return self
+    
+
