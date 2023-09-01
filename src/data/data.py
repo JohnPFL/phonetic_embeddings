@@ -62,9 +62,13 @@ class TextDatasetHate(TextDataset):
         return 'Dataset Hate\n' + super().__repr__()
 
 class MultipathDataset(TextDataset):
-    def __init__(self, clean_path, adv_path, phonetic = True, hard=False):
-        self.train_X, self.train_y = TextDataset._read(clean_path)
-        self.test_X, self.test_y = TextDataset._read(adv_path)
+    def __init__(self, clean_path, adv_path, phonetic = False, hard=False, adversarial = False):
+        self.train_X, self.train_y = TextDataset._read(join(clean_path, 'train.txt'))
+        self.test_X, self.test_y = TextDataset._read(join(adv_path, 'test.txt'))
+        if phonetic:
+            if adversarial:
+                self.test_X, self.test_y = TextDataset._read(join(adv_path, 'test_misspelled.txt'))
+
         # Get unique classes and sort them
         self.classes = np.unique(self.train_y)
         self.classes.sort()

@@ -478,7 +478,7 @@ def prepare_and_update_dataframe(dataframe_path_a, dataframe_path_c, type_of_adv
 
 def pipeline_adversarial(cln_path, adv_path, 
                          model, dataframe_path, 
-                         verbose, rerun_check, implied_models, pht_path = 'False'):
+                         verbose, rerun_check, implied_models, pht_path = 'False', phonetic = False, adversarial = False):
     """
     Execute the pipeline for adversarial experiments.
 
@@ -502,8 +502,8 @@ def pipeline_adversarial(cln_path, adv_path,
     if pht_path == 'False':
         pht_path = False
 
-    dataset_clean = data.MultipathDataset(cln_path, cln_path, phonetic = True)
-    dataset_adv = data.MultipathDataset(cln_path, adv_path, phonetic = True)
+    dataset_clean = data.MultipathDataset(cln_path, cln_path, phonetic = phonetic)
+    dataset_adv = data.MultipathDataset(cln_path, adv_path, phonetic = phonetic, adversarial = adversarial)
 
     if pht_path:
         dataset_pht = data.MultipathDataset(cln_path, pht_path)

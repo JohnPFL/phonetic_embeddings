@@ -47,14 +47,15 @@ def main():
     implied_models = ['cnn_phonetic']
 
     misspelled_dataset_path = args.misspelled_dataset_path
-    phonemized_train = args.phonemized_train
+    phonemized_datasets = args.phonemized_train
     phonemized_misspelled_test = args.phonemized_misspelled_test
 
     pipeline_adversarial(
-        phonemized_train,
-        misspelled_dataset_path,
+        phonemized_datasets,
+        phonemized_datasets,
         models['cnnBase'], args.results_path,
-        False, False, implied_models, phonemized_misspelled_test
+        False, False, implied_models, phonemized_misspelled_test,
+        phonetic = True, adversarial = True
     )
 
     pipeline_adversarial(
