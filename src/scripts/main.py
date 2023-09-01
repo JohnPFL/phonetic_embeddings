@@ -1,3 +1,10 @@
+import sys
+sys.path.append('/home/sperduti/sound_embeddings/src')
+sys.path.append('/home/sperduti/sound_embeddings/src/models')
+sys.path.append('/home/sperduti/sound_embeddings/src/module')
+sys.path.append('/home/sperduti/sound_embeddings/src/utils')
+sys.path.append('/home/sperduti/sound_embeddings/src/sound_embeddings')
+sys.path.append('/home/sperduti/sound_embeddings/Datasets')
 
 import argparse
 from models.models_ import CNNbaseClassifier, SVMclassifier
