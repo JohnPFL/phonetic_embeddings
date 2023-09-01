@@ -63,7 +63,7 @@ class TextDatasetHate(TextDataset):
 
 class MultipathDataset(TextDataset):
     def __init__(self, clean_path, adv_path, phonetic = True, hard=False):
-        self.train_X, self.train_y = TextDataset._read(join(clean_path, 'train.txt'))
+        self.train_X, self.train_y = TextDataset._read(clean_path)
         self.test_X, self.test_y = TextDataset._read(adv_path)
         # Get unique classes and sort them
         self.classes = np.unique(self.train_y)

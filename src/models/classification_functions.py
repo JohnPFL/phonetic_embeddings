@@ -317,8 +317,6 @@ def process_early_stop(model, val_loss, epoch, early_stop, tmp_path,
         str: Path to the latest saved model.
     """
     early_stop(val_loss, epoch)
-    print(f'improved: {early_stop.IMPROVED}')
-    print(tmp_path)
     if early_stop.IMPROVED:
         latest_model = definig_latest_model(dataset_name, model_name, epoch)
         torch.save(model, join(tmp_path, latest_model))
